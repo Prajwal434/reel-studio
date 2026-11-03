@@ -79,6 +79,14 @@ fn write_json(path: String, value: Value) -> Result<(), String> {
     fs::rename(&tmp, &path).map_err(|e| e.to_string())
 }
 
+/// a script / screenplay file the user picked (plain text formats)
+#[tauri::command]
+fn read_text(path: String) -> Result<String, String> {
+    let b = fs::read(&path).map_err(|e| e.to_string())?;
+    if b.len() > 2_000_000 { return Err("That file is too big for a script.".into()); }
+    String::from_utf8(b).map_err(|_| "Only plain-text scripts (.txt, .md, .fountain) can be read. Paste other formats into the box.".into())
+}
+
 #[tauri::command]
 fn path_exists(path: String) -> bool {
     PathBuf::from(path).exists()
@@ -180,7 +188,7 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
-            load_settings, save_settings, home_dir, engine_defaults, read_json, write_json, path_exists, list_projects, reveal, run_engine
+            load_settings, save_settings, home_dir, engine_defaults, read_json, write_json, read_text, path_exists, list_projects, reveal, run_engine
         ])
         .run(tauri::generate_context!())
         .expect("error while running Reel Studio");

@@ -33,22 +33,31 @@
       <h2>New project</h2>
       <div class="card">
         <div class="field">
+          <label>What are you making?</label>
+          <div class="templates">
+            <label class="tpl"><input type="radio" name="tpl" value="cover" checked />
+              <div><b>Singing cover</b><span>Mood grade, voice and guitar polish, lyrics under your face, song title card.</span></div></label>
+            <label class="tpl"><input type="radio" name="tpl" value="talk" />
+              <div><b>Talking reel</b><span>Clean look, clear voice, bold captions.</span></div></label>
+            <label class="tpl"><input type="radio" name="tpl" value="skit" />
+              <div><b>AI skit</b><span>You talk to an AI on your laptop and leave pauses; it answers in a natural voice. Product demo + end card.</span></div></label>
+            <label class="tpl"><input type="radio" name="tpl" value="montage" />
+              <div><b>Clips + transitions</b><span>Several clips trimmed, graded and joined with whip, zoom or flash transitions on the beat.</span></div></label>
+            <label class="tpl"><input type="radio" name="tpl" value="custom" />
+              <div><b>Custom</b><span>One or more clips; you choose the look, captions, music, transitions and end card.</span></div></label>
+          </div>
+        </div>
+        <div class="field single-only">
           <label>Video</label>
           <div class="row">
             <button class="btn" id="pickVideo">Choose video…</button>
             <span id="videoName" class="muted">No video chosen</span>
           </div>
         </div>
-        <div class="field">
-          <label>What is it?</label>
-          <div class="templates">
-            <label class="tpl"><input type="radio" name="tpl" value="cover" checked />
-              <div><b>Singing cover</b><span>Mood grade, voice and guitar polish, lyrics under your face, song title card.</span></div></label>
-            <label class="tpl"><input type="radio" name="tpl" value="talk" />
-              <div><b>Talking reel</b><span>Clean look, clear voice, bold word-by-word captions.</span></div></label>
-            <label class="tpl"><input type="radio" name="tpl" value="skit" />
-              <div><b>AI skit</b><span>You talk to an AI on your laptop and leave pauses: it answers in a natural voice. Optional product demo + end card.</span></div></label>
-          </div>
+        <div class="field multi-only">
+          <label>Videos (in order)</label>
+          <div class="row"><button class="btn" id="pickClips">Add videos…</button><span class="muted small">Reorder with the arrows.</span></div>
+          <div id="clipList" class="filelist"></div>
         </div>
         <div class="field skit-only">
           <label>Who is the AI in the skit?</label>
@@ -65,8 +74,22 @@
           </div>
         </div>
         <div class="field">
+          <label>Script / screenplay <span class="muted">(optional)</span></label>
+          <textarea id="scriptText" rows="6" placeholder="Paste or type your script. For AI skits, label lines like&#10;ME: ChatGPT, I want to become a better singer.&#10;CHATGPT: That's great! You should consider a vocal class.&#10;The AI's lines fill its pauses; your lines fix mis-heard captions. For covers, paste the lyrics."></textarea>
+          <div class="row" style="margin-top:6px"><button class="btn" id="uploadScript">Upload script…</button><span id="scriptName" class="muted small">.txt, .md or .fountain</span></div>
+        </div>
+        <div class="field">
+          <label>Reference videos <span class="muted">(optional)</span></label>
+          <div class="row"><button class="btn" id="pickRefs">Add reference videos…</button><span class="muted small">Reels whose style you like: the look and pace start from them.</span></div>
+          <div id="refList" class="filelist"></div>
+        </div>
+        <div class="field">
           <label>Project name</label>
           <input id="projName" placeholder="My reel" />
+        </div>
+        <div id="styleNote" class="stylenote hidden">
+          <span></span>
+          <label class="check small"><input type="checkbox" id="useStyle" checked /> Start from my style</label>
         </div>
         <div class="row end">
           <span id="newError" class="error"></span>
@@ -76,7 +99,7 @@
       <div id="analyzeBox" class="card hidden">
         <h3>Analyzing</h3>
         <ol id="steps" class="steps"></ol>
-        <p class="muted small">Separating the voice from the guitar takes a few minutes. You can leave this window open.</p>
+        <p class="muted small">This takes a few minutes for long clips. You can leave this window open.</p>
       </div>
     </section>
 
@@ -101,11 +124,13 @@
         </div>
         <div class="panel">
           <div class="tabs">
+            <button data-tab="clips" class="multi-tab">Clips</button>
             <button data-tab="words" class="on">Words</button>
             <button data-tab="replies" class="skit-tab">AI replies</button>
             <button data-tab="look">Look</button>
             <button data-tab="trim" class="noskit-tab">Trim &amp; sound</button>
             <button data-tab="details" class="skit-tab">Details</button>
+            <button data-tab="style" class="multi-tab">Style</button>
             <button data-tab="export">Export</button>
           </div>
           <div class="tab" id="tab-words">
@@ -140,6 +165,28 @@
             <h3>Trim</h3>
             <div class="row"><input type="number" step="0.1" id="sIn" /><button class="btn" data-set2="sIn">Start = playhead</button>
               <input type="number" step="0.1" id="sOut" /><button class="btn" data-set2="sOut">End = playhead</button></div>
+          </div>
+          <div class="tab hidden" id="tab-clips">
+            <p class="muted small">Click a clip to preview it. Set where each one starts and ends; the Words tab shows the selected clip's captions.</p>
+            <div id="clipsEdit" class="clipsedit"></div>
+            <div class="row"><button class="btn" id="addClips">+ Add clips</button><span class="muted small">New clips need Analyze again to get captions.</span></div>
+          </div>
+          <div class="tab hidden" id="tab-style">
+            <div class="field"><label>Transition between clips</label>
+              <select id="oTrans"><option value="whip">Whip pan</option><option value="zoom">Zoom punch</option><option value="flash">Flash</option><option value="crossfade">Crossfade</option><option value="cut">Hard cut</option></select></div>
+            <div class="field"><label>Music</label>
+              <select id="oMusic"><option value="upbeat">Upbeat (electronic, 125 BPM)</option><option value="comedic">Comedic (playful)</option><option value="none">None</option></select></div>
+            <div class="field"><label>Captions</label>
+              <select id="oCaps"><option value="bold">Bold (white, outlined)</option><option value="serif">Elegant serif</option><option value="off">Off</option></select></div>
+            <div class="field"><label class="check"><input type="checkbox" id="oBeat" /> Cut silent clips on the beat</label></div>
+            <div class="field"><label class="check"><input type="checkbox" id="oPunch" /> Alternate punch-in framing</label></div>
+            <div class="field"><label class="check"><input type="checkbox" id="oSound" /> Keep the clips' own sound (quieter under music)</label></div>
+            <div class="field"><label>Header (top box, optional)</label><input id="mHeader" /></div>
+            <h3>End card</h3>
+            <div class="field"><input id="mTitle" placeholder="Title (wrap words in *stars* to colour them)" /></div>
+            <div class="field"><input id="mSub" placeholder="Subtitle" /></div>
+            <div class="field"><input id="mCta" placeholder="Call to action" /></div>
+            <div class="field"><input id="mUrl" placeholder="Small line (website, handle)" /></div>
           </div>
           <div class="tab hidden" id="tab-look">
             <div id="looks" class="looks"></div>

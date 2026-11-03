@@ -12,7 +12,7 @@ Commands
   voice <dir> <i>            (skit) preview reply i in the AI voice
   setup                      download all models (first run)
 
-project.json: name, video, template (cover|talk|skit), song{title,artist}, look, duration, fps, trim{in,out,fade_out},
+project.json: name, video, template (cover|talk|skit|montage|custom; the last two take clips[] instead of video), song{title,artist}, look, duration, fps, trim{in,out,fade_out},
 lines[{start,end,text}], title_card, inst_db."""
 import sys, os, json, subprocess, shutil, re, time
 import numpy as np
@@ -163,9 +163,51 @@ def activity_end(paths, duration):
     return round(min(duration - 0.5, last + 0.6), 2) if last else round(duration, 2)
 
 
+def extras(p):
+    """reference videos -> starting style; script -> caption words + the AI character's lines"""
+    notes = []
+    refs = [r for r in p.get("references") or [] if os.path.exists(r)]
+    if refs:
+        import reference
+        progress("reference", 0.2, "Studying your reference videos")
+        st = reference.style(sys.modules[__name__], refs)
+        progress("reference", 1.0)
+        if st:
+            p["reference_style"] = st
+            p["look"] = st["look"]
+            if p["template"] in ("montage", "custom"):
+                p["options"] = {**p.get("options", {}), **{k: st[k] for k in ("transition", "beat_sync", "music")}}
+            notes.append(st["note"])
+    if (p.get("script") or "").strip():
+        import script, skit
+        case = (lambda t: skit.caption_case(t, False)) if p["template"] in ("skit", "talk", "montage", "custom") else None
+        n = 0
+        if p["template"] in ("montage", "custom"):
+            for c in p.get("clips", []):
+                _, k = script.fix_captions(c.get("lines", []), p["script"], p.get("ai_name", ""), case); n += k
+        else:
+            _, n = script.fix_captions(p.get("lines", []), p["script"], p.get("ai_name", ""), case)
+        if n: notes.append(f"{n} caption line{'s' if n > 1 else ''} corrected from your script.")
+        if p["template"] == "skit":
+            ai = script.ai_lines(p["script"], p.get("ai_name", ""))
+            slots = [r for r in sorted(p.get("replies", []), key=lambda r: r["start"]) if r.get("mode", "reply") == "reply"]
+            for r, t in zip(slots, ai): r["text"] = t
+            if ai: notes.append(f"{min(len(ai), len(slots))} AI line{'s' if len(ai) > 1 else ''} filled from your script"
+                                + (f" ({len(ai)} in the script, {len(slots)} pauses in the video)." if len(ai) != len(slots) else "."))
+    if notes: p["ai_note"] = " ".join(([p["ai_note"]] if p.get("ai_note") else []) + notes)
+
+
 def analyze(d):
     p = load(d)
     work = os.path.join(d, "work"); os.makedirs(work, exist_ok=True)
+    if p["template"] in ("montage", "custom"):
+        import montage
+        montage.analyze(sys.modules[__name__], d, p)
+        extras(p)
+        p["analyzed"] = True
+        save(d, p)
+        emit("done", project=p)
+        return
     progress("probe", 0.0, "Reading the video")
     info = probe(p["video"])
     if not info["has_audio"]: raise RuntimeError("This video has no sound track.")
@@ -177,6 +219,7 @@ def analyze(d):
     if p["template"] == "skit":
         import skit
         skit.analyze(sys.modules[__name__], d, p)
+        extras(p)
         p["analyzed"] = True
         save(d, p)
         emit("done", project=p)
@@ -213,6 +256,7 @@ def analyze(d):
     p["lines"] = lines
     p["trim"] = dict(**{"in": 0.0, "out": out, "fade_out": 1.8 if p["template"] == "cover" else 0.4})
     p.setdefault("look", "moody" if p["template"] == "cover" else "clean")
+    extras(p)
     p["analyzed"] = True
     save(d, p)
     mix(d, p)
@@ -270,9 +314,9 @@ def still(d, look, t):
 
 def render(d, target):
     p = load(d)
-    if p["template"] == "skit":
-        import skit
-        out = skit.render(sys.modules[__name__], d, p, target)
+    if p["template"] in ("skit", "montage", "custom"):
+        mod = __import__("skit" if p["template"] == "skit" else "montage")
+        out = mod.render(sys.modules[__name__], d, p, target)
         emit("done", path=out, size=os.path.getsize(out)); return
     import cv2
     from looks import Grader

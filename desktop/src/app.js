@@ -8,6 +8,8 @@ const $$ = (s) => [...document.querySelectorAll(s)];
 const sep = navigator.userAgent.includes('Windows') ? '\\' : '/';
 const join = (...a) => a.join(sep).replace(/[\\/]+/g, sep);
 
+const isMulti = (t) => t === 'montage' || t === 'custom';
+const KIND = { cover: 'Singing cover', talk: 'Talking reel', skit: 'AI skit', montage: 'Clips + transitions', custom: 'Custom' };
 let settings = {};
 let project = null; // current project.json (+ dir)
 let saveTimer = null;
@@ -49,7 +51,7 @@ async function refreshProjects() {
   nav.innerHTML = '';
   for (const p of list) {
     const b = document.createElement('button');
-    b.innerHTML = `${esc(p.name || 'Untitled')}<small>${{ cover: 'Singing cover', talk: 'Talking reel', skit: 'AI skit' }[p.template]}${p.analyzed ? '' : ' · not analyzed'}</small>`;
+    b.innerHTML = `${esc(p.name || 'Untitled')}<small>${KIND[p.template] || ''}${p.analyzed ? '' : ' · not analyzed'}</small>`;
     b.onclick = () => openProject(p.dir, b);
     if (project && project.dir === p.dir) b.classList.add('on');
     nav.appendChild(b);
@@ -130,13 +132,54 @@ async function checkEngine(quiet) {
 
 // ---------------------------------------------------------------- new project
 let newVideo = null;
+let newClips = [];
+let newRefs = [];
+
+function fileList(el, arr, rerender) {
+  el.innerHTML = '';
+  arr.forEach((f, i) => {
+    const r = document.createElement('div'); r.className = 'filerow';
+    r.innerHTML = `<span>${esc(f.split(/[\\/]/).pop())}</span><button title="Up">↑</button><button title="Down">↓</button><button title="Remove">✕</button>`;
+    const [up, dn, rm] = r.querySelectorAll('button');
+    up.onclick = () => { if (i) { [arr[i - 1], arr[i]] = [arr[i], arr[i - 1]]; rerender(); } };
+    dn.onclick = () => { if (i < arr.length - 1) { [arr[i + 1], arr[i]] = [arr[i], arr[i + 1]]; rerender(); } };
+    rm.onclick = () => { arr.splice(i, 1); rerender(); };
+    el.appendChild(r);
+  });
+}
+const renderNewLists = () => { fileList($('#clipList'), newClips, renderNewLists); fileList($('#refList'), newRefs, renderNewLists); };
+const VIDEO_FILTER = [{ name: 'Video', extensions: ['mp4', 'mov', 'm4v', 'MOV', 'MP4'] }];
+
+// ---- my style: what the user chose on their last export of each project type; new projects start from it
+const STYLE_KEYS = ['look', 'ai_voice', 'header', 'endcard', 'options', 'title_card', 'inst_db'];
+function styleOf(tpl) { return (settings.style || {})[tpl]; }
+function describeStyle(st) {
+  const parts = [];
+  if (st.look) parts.push(`${(LOOKS.find((l) => l[0] === st.look) || [, st.look])[1]} look`);
+  if (st.ai_voice) parts.push(`${(VOICES.find((v) => v[0] === st.ai_voice) || [, st.ai_voice])[1].split(' (')[0]} voice`);
+  if (st.options?.transition) parts.push(`${st.options.transition} transitions`);
+  if (st.options?.music) parts.push(`${st.options.music} music`);
+  if (st.endcard?.title) parts.push(`end card "${st.endcard.title.replace(/\*/g, '')}"`);
+  if (st.header) parts.push('your header');
+  return parts.join(' · ');
+}
+async function learnStyle(p) {
+  const st = {};
+  for (const k of STYLE_KEYS) if (p[k] !== undefined && p[k] !== '') st[k] = JSON.parse(JSON.stringify(p[k]));
+  if (p.demo?.zoom) st.demo_zoom = p.demo.zoom;
+  settings.style = { ...(settings.style || {}), [p.template]: st };
+  await invoke('save_settings', { settings });
+}
 const STEP_LABELS = { probe: 'Reading the video', separate: 'Separating voice and instrument', transcribe: 'Listening for the words',
-  face: 'Finding your face', ai: 'AI checks the words', mix: 'Polishing the sound' };
+  face: 'Finding your face', ai: 'AI checks the words', reference: 'Studying your reference videos', mix: 'Polishing the sound' };
 
 function renderSteps(state) {
   const tpl = document.querySelector('input[name=tpl]:checked').value;
   const ai = settings.provider !== 'none' && settings.api_key ? ['ai'] : [];
-  const order = tpl === 'skit' ? ['probe', 'transcribe', 'face', ...ai] : ['probe', ...(tpl === 'cover' ? ['separate'] : []), 'transcribe', ...ai, 'mix'];
+  const ref = newRefs.length ? ['reference'] : [];
+  const order = tpl === 'skit' ? ['probe', 'transcribe', 'face', ...ai, ...ref]
+    : isMulti(tpl) ? ['probe', 'transcribe', ...ref]
+    : ['probe', ...(tpl === 'cover' ? ['separate'] : []), 'transcribe', ...ai, ...ref, 'mix'];
   $('#steps').innerHTML = order.map((k) => {
     const s = state[k] || {};
     const cls = s.fail ? 'fail' : s.pct >= 1 ? 'done' : s.pct != null ? 'run' : '';
@@ -148,13 +191,26 @@ function renderSteps(state) {
 
 async function createProject() {
   $('#newError').textContent = '';
-  if (!newVideo) return ($('#newError').textContent = 'Choose a video first.');
   const template = document.querySelector('input[name=tpl]:checked').value;
-  const name = $('#projName').value.trim() || newVideo.split(/[\\/]/).pop().replace(/\.[^.]+$/, '');
+  if (isMulti(template) ? !newClips.length : !newVideo) return ($('#newError').textContent = isMulti(template) ? 'Add at least one video.' : 'Choose a video first.');
+  const first = isMulti(template) ? newClips[0] : newVideo;
+  const name = $('#projName').value.trim() || first.split(/[\\/]/).pop().replace(/\.[^.]+$/, '');
   const slug = name.replace(/[^A-Za-z0-9 _-]+/g, '').trim().replace(/\s+/g, '-') || 'reel';
   let dir = join(settings.projects_dir, slug);
   for (let i = 2; await invoke('path_exists', { path: dir }); i++) dir = join(settings.projects_dir, `${slug}-${i}`);
-  const p = { name, video: newVideo, template, title_card: true };
+  const p = { name, template, title_card: true };
+  if (isMulti(template)) p.clips = newClips.map((path) => ({ path }));
+  else p.video = newVideo;
+  if (template === 'montage') p.options = { transition: 'whip', music: 'upbeat', beat_sync: true };
+  if (template === 'custom') p.options = { transition: 'cut', music: 'none', beat_sync: false, punch_in: false };
+  const st = styleOf(template);
+  if (st && $('#useStyle').checked) {
+    for (const k of STYLE_KEYS) if (st[k] !== undefined) p[k] = JSON.parse(JSON.stringify(st[k]));
+    if (st.demo_zoom) p.demo = { video: '', texts: ['', '', '', '', ''], zoom: st.demo_zoom };
+  }
+  const script = $('#scriptText').value.trim();
+  if (script) p.script = script;
+  if (newRefs.length) p.references = [...newRefs];
   if (template === 'cover') p.song = { title: $('#songTitle').value.trim(), artist: $('#songArtist').value.trim() };
   if (template === 'skit') { p.ai_name = $('#aiName').value.trim() || 'the AI'; p.vocab = $('#vocab').value.trim(); }
   await invoke('write_json', { path: join(dir, 'project.json'), value: p });
@@ -182,7 +238,9 @@ async function createProject() {
 }
 
 function resetNew() {
-  newVideo = null;
+  newVideo = null; newClips = []; newRefs = [];
+  renderNewLists();
+  $('#scriptText').value = ''; $('#scriptName').textContent = '.txt, .md or .fountain';
   $('#videoName').textContent = 'No video chosen';
   ['#songTitle', '#songArtist', '#projName', '#aiName', '#vocab'].forEach((s) => ($(s).value = ''));
   $('#analyzeBox').classList.add('hidden');
@@ -194,6 +252,11 @@ function syncTemplate() {
   const tpl = document.querySelector('input[name=tpl]:checked').value;
   $$('#view-new .cover-only').forEach((e) => e.classList.toggle('hidden', tpl !== 'cover'));
   $$('#view-new .skit-only').forEach((e) => e.classList.toggle('hidden', tpl !== 'skit'));
+  $$('#view-new .single-only').forEach((e) => e.classList.toggle('hidden', isMulti(tpl)));
+  $$('#view-new .multi-only').forEach((e) => e.classList.toggle('hidden', !isMulti(tpl)));
+  const st = styleOf(tpl);
+  $('#styleNote').classList.toggle('hidden', !st);
+  if (st) $('#styleNote span').textContent = `Your ${KIND[tpl]} style: ${describeStyle(st) || 'saved'}`;
 }
 
 // ---------------------------------------------------------------- project editor
@@ -226,22 +289,23 @@ async function openProject(dir, btn) {
   show('project');
   $('#pName').textContent = p.name;
   const song = p.song?.title ? ` · ${p.song.title}${p.song.artist ? ' – ' + p.song.artist : ''}` : '';
-  const kind = { cover: 'Singing cover', talk: 'Talking reel', skit: 'AI skit' }[p.template];
-  $('#pMeta').textContent = `${kind}${song} · ${p.duration.toFixed(1)} s`;
-  const skit = p.template === 'skit';
+  $('#pMeta').textContent = `${KIND[p.template]}${song} · ${p.duration.toFixed(1)} s${p.clips ? ` · ${p.clips.length} clips` : ''}`;
+  const skit = p.template === 'skit', multi = isMulti(p.template);
   $$('.skit-tab').forEach((b) => b.classList.toggle('hidden', !skit));
-  $$('.noskit-tab').forEach((b) => b.classList.toggle('hidden', skit));
+  $$('.multi-tab').forEach((b) => b.classList.toggle('hidden', !multi));
+  $$('.noskit-tab').forEach((b) => b.classList.toggle('hidden', skit || multi));
   if (skit) { renderReplies(); fillDetails(); }
+  if (multi) { curClip = 0; renderClipsEdit(); fillStyle(); }
   $('#aiNote').textContent = p.ai_note || '';
   $$('#view-project .cover-only').forEach((e) => e.classList.toggle('hidden', p.template !== 'cover'));
   $('#ovLine').classList.toggle('talk', p.template !== 'cover');
-  player.src = convertFileSrc(p.video);
+  player.src = convertFileSrc(multi ? p.clips[0].path : p.video);
   player.style.filter = LOOK_CSS[p.look] || '';
   renderLines();
   fillTrim();
   renderOutputs();
   $('#capText').value = p.caption || '';
-  selectTab('words');
+  selectTab(multi ? 'clips' : 'words');
   refreshProjects();
 }
 
@@ -260,13 +324,18 @@ function selectTab(t) {
 }
 
 // words
+let curClip = 0;
+const curLines = () => (isMulti(project.template) ? (project.clips[curClip].lines ||= []) : project.lines);
+const curRange = () => (isMulti(project.template) ? [project.clips[curClip].in, project.clips[curClip].out] : [project.trim.in, project.trim.out]);
+
 function renderLines() {
   const box = $('#lines');
   box.innerHTML = '';
-  project.lines.sort((a, b) => a.start - b.start);
-  project.lines.forEach((l, i) => {
+  const lines = curLines();
+  lines.sort((a, b) => a.start - b.start);
+  lines.forEach((l, i) => {
     const r = document.createElement('div');
-    const skit = project.template === 'skit';
+    const skit = project.template === 'skit' || isMulti(project.template);
     r.className = 'lrow' + (skit ? ' skit' : '') + (l.skip ? ' skipped' : '');
     r.innerHTML = `<input class="t" type="number" step="0.05" value="${l.start}" title="Start (s)" />
       <input class="t" type="number" step="0.05" value="${l.end}" title="End (s)" />
@@ -278,7 +347,7 @@ function renderLines() {
     s.onchange = () => { l.start = +s.value; saveProject(); };
     e.onchange = () => { l.end = +e.value; saveProject(); };
     t.oninput = () => { l.text = t.value; saveProject(); };
-    r.querySelector('button').onclick = () => { project.lines.splice(i, 1); saveProject(); renderLines(); };
+    r.querySelector('button').onclick = () => { lines.splice(i, 1); saveProject(); renderLines(); };
     r.onclick = (ev) => { if (ev.target.tagName !== 'BUTTON' && ev.target !== t && ev.target.type !== 'checkbox') { player.currentTime = l.start; } };
     box.appendChild(r);
   });
@@ -286,7 +355,7 @@ function renderLines() {
 
 function addLine() {
   const t = +player.currentTime.toFixed(2);
-  project.lines.push({ start: t, end: +(t + 2.5).toFixed(2), text: '' });
+  curLines().push({ start: t, end: +(t + 2.5).toFixed(2), text: '' });
   saveProject(); renderLines();
 }
 
@@ -294,7 +363,7 @@ function addLine() {
 function tick() {
   if (project && !$('#view-project').classList.contains('hidden')) {
     const t = player.currentTime;
-    const lines = project.lines.filter((l) => l.text.trim() && !l.skip);
+    const lines = curLines().filter((l) => l.text.trim() && !l.skip);
     let cur = null;
     lines.forEach((l, i) => {
       const nxt = lines[i + 1]?.start ?? 1e9;
@@ -305,8 +374,9 @@ function tick() {
     const ov = $('#ovLine');
     ov.textContent = cur ? cur.text : '';
     ov.style.opacity = cur ? 1 : 0;
-    $$('.lrow').forEach((r, i) => r.classList.toggle('now', project.lines[i] === cur));
-    const rel = t - project.trim.in;
+    $$('.lrow').forEach((r, i) => r.classList.toggle('now', curLines()[i] === cur));
+    const [rin, rout] = curRange();
+    const rel = t - rin;
     const showTitle = project.template === 'cover' && project.title_card && project.song?.title && rel > 0.4 && rel < 6;
     $('#ovTitle').classList.toggle('hidden', !showTitle);
     if (showTitle) {
@@ -314,7 +384,7 @@ function tick() {
       $('#ovTitle small').textContent = `${project.song.artist ? project.song.artist + ' · ' : ''}cover`;
     }
     // preview only the trimmed range
-    if (!player.paused && t >= project.trim.out) { player.pause(); player.currentTime = project.trim.out; }
+    if (!player.paused && rout && t >= rout) { player.pause(); player.currentTime = rout; }
   }
   requestAnimationFrame(tick);
 }
@@ -323,7 +393,8 @@ function tick() {
 async function renderLooks() {
   const box = $('#looks');
   box.innerHTML = '';
-  const t = project.lines[0] ? (project.lines[0].start + project.lines[0].end) / 2 : project.duration / 3;
+  const ls = curLines(), [ra, rb] = curRange();
+  const t = ls[0] ? (ls[0].start + ls[0].end) / 2 : (ra + (rb || project.duration)) / 2;
   const cards = LOOKS.map(([id, label, desc]) => {
     const b = document.createElement('button');
     b.className = 'look' + (project.look === id ? ' on' : '');
@@ -362,7 +433,8 @@ async function render(target) {
   $$('[data-render]').forEach((b) => (b.disabled = true));
   $('#renderBox').classList.remove('hidden');
   const set = (pct, msg) => { $('#renderBar').style.width = `${Math.round(pct * 100)}%`; if (msg) $('#renderMsg').textContent = msg; };
-  const W = project.template === 'skit'
+  const W = isMulti(project.template) ? { mix: [0, 0.06], render: [0.06, 0.97], mux: [0.97, 1] }
+    : project.template === 'skit'
     ? { voice: [0, 0.06], mix: [0.06, 0.12], render: [0.12, 0.97], mux: [0.97, 1] }
     : { mix: [0, 0.08], render: [0.08, 0.95], mux: [0.95, 1] };
   set(0, target === 'yt' ? 'Rendering 4K: this takes a few minutes' : 'Rendering');
@@ -373,6 +445,7 @@ async function render(target) {
     set(1, `Done · ${(r.size / 1e6).toFixed(1)} MB`);
     project.exports = [...new Set([r.path, ...(project.exports || [])])];
     saveProject(); renderOutputs();
+    learnStyle(project); // new projects of this type start from these choices
   } catch (e) {
     $('#renderMsg').innerHTML = `<span class="error">${esc(e.message)}</span>`;
   } finally {
@@ -481,11 +554,70 @@ function flushSave() {
   return invoke('write_json', { path: join(dir, 'project.json'), value: data });
 }
 
+// ---------------------------------------------------------------- multi-clip: clips + style
+function selectClip(i) {
+  curClip = i;
+  player.src = convertFileSrc(project.clips[i].path);
+  player.addEventListener('loadedmetadata', () => (player.currentTime = project.clips[i].in || 0), { once: true });
+  renderClipsEdit(); renderLines();
+}
+function renderClipsEdit() {
+  const box = $('#clipsEdit');
+  box.innerHTML = '';
+  project.clips.forEach((c, i) => {
+    const r = document.createElement('div');
+    r.className = 'clipedit' + (i === curClip ? ' on' : '');
+    r.innerHTML = `<div class="nm">${i + 1}. ${esc(c.path.split(/[\\/]/).pop())}<small>${c.speech ? 'speech · captions' : c.duration ? 'no speech' : 'not analyzed'}${c.duration ? ` · ${c.duration.toFixed(1)} s` : ''}</small></div>
+      <input type="number" step="0.1" min="0" value="${c.in ?? 0}" title="Start (s)" />
+      <input type="number" step="0.1" min="0" value="${c.out ?? ''}" title="End (s)" />
+      <div class="acts"><button title="Start = playhead">⇤</button><button title="End = playhead">⇥</button><button title="Move up">↑</button><button title="Remove">✕</button></div>`;
+    const [a, b] = r.querySelectorAll('input');
+    const [sIn, sOut, up, rm] = r.querySelectorAll('.acts button');
+    a.onchange = () => { c.in = +a.value; saveProject(); };
+    b.onchange = () => { c.out = +b.value; saveProject(); };
+    sIn.onclick = (e) => { e.stopPropagation(); if (i === curClip) { c.in = +player.currentTime.toFixed(2); a.value = c.in; saveProject(); } };
+    sOut.onclick = (e) => { e.stopPropagation(); if (i === curClip) { c.out = +player.currentTime.toFixed(2); b.value = c.out; saveProject(); } };
+    up.onclick = (e) => { e.stopPropagation(); if (i) { [project.clips[i - 1], project.clips[i]] = [project.clips[i], project.clips[i - 1]]; curClip = i - 1; saveProject(); renderClipsEdit(); } };
+    rm.onclick = (e) => { e.stopPropagation(); if (project.clips.length > 1) { project.clips.splice(i, 1); selectClip(0); saveProject(); } };
+    r.onclick = (e) => { if (e.target.tagName !== 'INPUT') selectClip(i); };
+    box.appendChild(r);
+  });
+}
+function fillStyle() {
+  const o = (project.options ||= {}), ec = (project.endcard ||= {});
+  $('#oTrans').value = o.transition || 'whip'; $('#oMusic').value = o.music || 'upbeat'; $('#oCaps').value = o.captions || 'bold';
+  $('#oBeat').checked = o.beat_sync ?? true; $('#oPunch').checked = o.punch_in ?? true; $('#oSound').checked = o.clip_sound ?? true;
+  $('#mHeader').value = project.header || '';
+  $('#mTitle').value = ec.title || ''; $('#mSub').value = ec.subtitle || ''; $('#mCta').value = ec.cta || ''; $('#mUrl').value = ec.url || '';
+}
+
 // ---------------------------------------------------------------- wire up
 $('#newBtn').onclick = resetNew;
 $('#welcomeNew').onclick = resetNew;
 $('#settingsBtn').onclick = () => { fillSettings(); show('settings'); };
 $$('input[name=tpl]').forEach((r) => (r.onchange = syncTemplate));
+$('#pickClips').onclick = async () => {
+  const f = await dialog.open({ multiple: true, filters: VIDEO_FILTER });
+  if (f) { newClips.push(...(Array.isArray(f) ? f : [f])); renderNewLists(); }
+};
+$('#pickRefs').onclick = async () => {
+  const f = await dialog.open({ multiple: true, filters: VIDEO_FILTER });
+  if (f) { newRefs.push(...(Array.isArray(f) ? f : [f])); renderNewLists(); }
+};
+$('#uploadScript').onclick = async () => {
+  const f = await dialog.open({ multiple: false, filters: [{ name: 'Script', extensions: ['txt', 'md', 'fountain', 'text'] }] });
+  if (!f) return;
+  try { $('#scriptText').value = await invoke('read_text', { path: f }); $('#scriptName').textContent = f.split(/[\\/]/).pop(); }
+  catch (e) { $('#scriptName').innerHTML = `<span class="error">${esc(e)}</span>`; }
+};
+$('#addClips').onclick = async () => {
+  const f = await dialog.open({ multiple: true, filters: VIDEO_FILTER });
+  if (f) { project.clips.push(...(Array.isArray(f) ? f : [f]).map((path) => ({ path, in: 0, out: 4, lines: [] }))); saveProject(); renderClipsEdit(); }
+};
+[['#oTrans', 'transition'], ['#oMusic', 'music'], ['#oCaps', 'captions']].forEach(([id, k]) => ($(id).onchange = () => { project.options[k] = $(id).value; saveProject(); }));
+[['#oBeat', 'beat_sync'], ['#oPunch', 'punch_in'], ['#oSound', 'clip_sound']].forEach(([id, k]) => ($(id).onchange = () => { project.options[k] = $(id).checked; saveProject(); }));
+$('#mHeader').oninput = () => { project.header = $('#mHeader').value; saveProject(); };
+[['#mTitle', 'title'], ['#mSub', 'subtitle'], ['#mCta', 'cta'], ['#mUrl', 'url']].forEach(([id, k]) => ($(id).oninput = () => { project.endcard[k] = $(id).value; saveProject(); }));
 $('#pickVideo').onclick = async () => {
   const f = await dialog.open({ multiple: false, filters: [{ name: 'Video', extensions: ['mp4', 'mov', 'm4v', 'MOV', 'MP4'] }] });
   if (f) { newVideo = f; $('#videoName').textContent = f.split(/[\\/]/).pop(); }
@@ -540,7 +672,7 @@ $('#setupBtn').onclick = async () => {
   $('#setupBtn').disabled = false;
 };
 $('#capCopy').onclick = () => navigator.clipboard.writeText($('#capText').value);
-player.addEventListener('play', () => { if (player.currentTime < project.trim.in || player.currentTime >= project.trim.out) player.currentTime = project.trim.in; });
+player.addEventListener('play', () => { const [a, b] = curRange(); if (player.currentTime < a || (b && player.currentTime >= b)) player.currentTime = a; });
 
 (async () => {
   await loadSettings();
