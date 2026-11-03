@@ -22,8 +22,15 @@ Exports: Instagram (1080x1920, -14 LUFS) and YouTube Shorts 4K (higher-bitrate a
 Mac (Apple Silicon) and Windows installers are on the [Releases](../../releases/latest) page. On first launch the app
 downloads its AI models (about 1.2 GB) once.
 
-The app isn't signed by Apple/Microsoft yet: on Mac, right-click the app > Open the first time; on Windows, choose
-"More info > Run anyway".
+The app isn't signed by Apple/Microsoft yet, so the first launch shows a warning. Mac: open it once, then System
+Settings > Privacy & Security > **Open Anyway**. Windows: "Windows protected your PC" > **More info > Run anyway**.
+
+## Is it safe?
+Every release is built by GitHub Actions straight from this repository, never on a personal machine, and comes with:
+- a signed **build-provenance attestation** (Sigstore). Verify any download with
+  `gh attestation verify ReelStudio-mac-arm64.dmg --repo Prajwal434/reel-studio`;
+- a **ClamAV virus scan** (`VIRUS-SCAN.txt` on the release);
+- **SHA-256 checksums** (`SHA256SUMS.txt`).
 
 ## Build from source
 - `engine/`: Python 3.12 engine (`engine.py <command> <project>`; JSON-line events on stdout).

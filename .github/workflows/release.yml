@@ -1,5 +1,7 @@
 # Builds the Mac (Apple Silicon) and Windows installers with the engine bundled inside, and publishes them on a
 # GitHub release when a version tag (v*) is pushed. Run manually (workflow_dispatch) to just get the build artifacts.
+# Free security for an unsigned open-source app: every installer gets a build-provenance attestation (Sigstore,
+# proves it was built here from this repo), a ClamAV virus scan, and SHA-256 checksums published with the release.
 name: release
 on:
   push:
@@ -21,6 +23,10 @@ jobs:
             asset: desktop/src-tauri/target/release/bundle/nsis/*-setup.exe
             name: ReelStudio-windows-x64-setup.exe
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
@@ -46,6 +52,10 @@ jobs:
           mkdir -p dist
           cp ${{ matrix.asset }} "dist/${{ matrix.name }}"
           ls -la dist
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dist/*
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.name }}
@@ -62,7 +72,30 @@ jobs:
         with:
           path: dist
           merge-multiple: true
+      - name: Virus scan (ClamAV)
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq clamav clamav-freshclam p7zip-full >/dev/null
+          sudo systemctl stop clamav-freshclam || true
+          sudo freshclam --quiet
+          mkdir -p scan && 7z x -y -oscan/mac dist/ReelStudio-mac-arm64.dmg >/dev/null || true
+          clamscan -r --infected --max-filesize=4000M --max-scansize=4000M dist scan | tee clamav.log
+          { echo "ClamAV scan of this release ($(date -u +%Y-%m-%d), $(clamscan --version))"; echo; grep -E "Scanned files|Infected files|Engine version|Known viruses" clamav.log; } > dist/VIRUS-SCAN.txt
+          grep -q "Infected files: 0" clamav.log
+      - name: Checksums
+        run: cd dist && sha256sum ReelStudio-* > SHA256SUMS.txt && cat SHA256SUMS.txt
       - uses: softprops/action-gh-release@v2
         with:
           files: dist/*
           generate_release_notes: true
+          body: |
+            **Downloads:** `ReelStudio-mac-arm64.dmg` (Apple Silicon) · `ReelStudio-windows-x64-setup.exe` (Windows 10/11)
+
+            **Security (free, for an open-source app):**
+            - Built by GitHub Actions from this repo, with a signed build-provenance attestation. Verify a download:
+              `gh attestation verify ReelStudio-mac-arm64.dmg --repo Prajwal434/reel-studio`
+            - Virus-scanned with ClamAV: see `VIRUS-SCAN.txt`.
+            - Checksums in `SHA256SUMS.txt` (`shasum -a 256 <file>` on Mac, `certutil -hashfile <file> SHA256` on Windows).
+
+            The installers aren't signed by Apple/Microsoft yet, so the first launch shows a warning:
+            - **Mac:** open the app once, then System Settings → Privacy & Security → **Open Anyway**.
+            - **Windows:** "Windows protected your PC" → **More info → Run anyway**.
