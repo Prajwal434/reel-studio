@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Reel Studio</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <aside class="side">
+    <div class="brand"><span class="logo">◐</span> Reel Studio</div>
+    <button class="btn primary wide" id="newBtn">+ New project</button>
+    <div class="side-label">Projects</div>
+    <nav id="projectList" class="plist"></nav>
+    <div class="side-foot">
+      <button class="link" id="settingsBtn">⚙ Settings</button>
+      <span id="engineDot" class="dot" title="Engine status"></span>
+    </div>
+  </aside>
+
+  <main id="main">
+    <!-- welcome -->
+    <section id="view-welcome" class="view">
+      <div class="empty">
+        <h1>Edit a reel in minutes</h1>
+        <p>Pick a video, choose what it is, and the editor does the rest: colour grade, sound polish, lyrics or captions, and exports for Instagram and YouTube.</p>
+        <button class="btn primary" id="welcomeNew">Start a new project</button>
+      </div>
+    </section>
+
+    <!-- new project -->
+    <section id="view-new" class="view hidden">
+      <h2>New project</h2>
+      <div class="card">
+        <div class="field">
+          <label>Video</label>
+          <div class="row">
+            <button class="btn" id="pickVideo">Choose video…</button>
+            <span id="videoName" class="muted">No video chosen</span>
+          </div>
+        </div>
+        <div class="field">
+          <label>What is it?</label>
+          <div class="templates">
+            <label class="tpl"><input type="radio" name="tpl" value="cover" checked />
+              <div><b>Singing cover</b><span>Mood grade, voice and guitar polish, lyrics under your face, song title card.</span></div></label>
+            <label class="tpl"><input type="radio" name="tpl" value="talk" />
+              <div><b>Talking reel</b><span>Clean look, clear voice, bold word-by-word captions.</span></div></label>
+            <label class="tpl"><input type="radio" name="tpl" value="skit" />
+              <div><b>AI skit</b><span>You talk to an AI on your laptop and leave pauses: it answers in a natural voice. Optional product demo + end card.</span></div></label>
+          </div>
+        </div>
+        <div class="field skit-only">
+          <label>Who is the AI in the skit?</label>
+          <div class="row">
+            <input id="aiName" placeholder="e.g. ChatGPT, or leave empty for an unnamed AI" />
+            <input id="vocab" placeholder="Words to recognise (names, products), comma-separated" />
+          </div>
+        </div>
+        <div class="field cover-only">
+          <label>Song</label>
+          <div class="row">
+            <input id="songTitle" placeholder="Song title (e.g. Wildflower)" />
+            <input id="songArtist" placeholder="Original artist" />
+          </div>
+        </div>
+        <div class="field">
+          <label>Project name</label>
+          <input id="projName" placeholder="My reel" />
+        </div>
+        <div class="row end">
+          <span id="newError" class="error"></span>
+          <button class="btn primary" id="createBtn">Create &amp; analyze</button>
+        </div>
+      </div>
+      <div id="analyzeBox" class="card hidden">
+        <h3>Analyzing</h3>
+        <ol id="steps" class="steps"></ol>
+        <p class="muted small">Separating the voice from the guitar takes a few minutes. You can leave this window open.</p>
+      </div>
+    </section>
+
+    <!-- project editor -->
+    <section id="view-project" class="view hidden">
+      <header class="phead">
+        <div>
+          <h2 id="pName"></h2>
+          <span id="pMeta" class="muted small"></span>
+        </div>
+        <span id="aiNote" class="chip"></span>
+      </header>
+      <div class="editor">
+        <div class="stage">
+          <div class="phone">
+            <video id="player" playsinline controls></video>
+            <div id="ovTitle" class="ov-title hidden"><i></i><small></small></div>
+            <div id="ovLine" class="ov-line"></div>
+            <div class="safe top"></div><div class="safe bottom"></div>
+          </div>
+          <p class="muted small center">Preview shows timing and text. The colour here is approximate; the Look tab shows the real grade.</p>
+        </div>
+        <div class="panel">
+          <div class="tabs">
+            <button data-tab="words" class="on">Words</button>
+            <button data-tab="replies" class="skit-tab">AI replies</button>
+            <button data-tab="look">Look</button>
+            <button data-tab="trim" class="noskit-tab">Trim &amp; sound</button>
+            <button data-tab="details" class="skit-tab">Details</button>
+            <button data-tab="export">Export</button>
+          </div>
+          <div class="tab" id="tab-words">
+            <p class="muted small">Click a line to jump there. Edit the text or timing. Lines with no text aren't shown.</p>
+            <div id="lines" class="lines"></div>
+            <div class="row">
+              <button class="btn" id="addLine">+ Line at playhead</button>
+            </div>
+          </div>
+          <div class="tab hidden" id="tab-replies">
+            <p class="muted small">The pauses you left in the take. Write what the AI says in each one, use one for the product demo, or cut it. ▶ plays the line in the AI voice.</p>
+            <div class="row" style="margin-bottom:12px">
+              <select id="aiVoice"></select>
+              <button class="btn" id="draftReplies">Draft replies with AI</button>
+              <span id="draftMsg" class="small muted"></span>
+            </div>
+            <div id="replies" class="replies"></div>
+            <audio id="voicePlayer"></audio>
+          </div>
+          <div class="tab hidden" id="tab-details">
+            <div class="field"><label>Header (top box, optional)</label><input id="dHeader" placeholder="POV: I just wanted to become a better singer" /></div>
+            <h3>Product demo</h3>
+            <p class="muted small">Pick a screen recording and set one pause to "Product demo" in AI replies. Five beat-synced shots; wrap words in *stars* to colour them.</p>
+            <div class="row"><button class="btn" id="pickDemo">Choose screen recording…</button><span id="demoName" class="muted small">None</span></div>
+            <div class="field" style="margin-top:10px"><label>Zoom into the screen: <b id="zoomVal"></b></label><input type="range" min="0.2" max="0.8" step="0.02" id="dZoom" /></div>
+            <div id="demoShots" class="shots"></div>
+            <h3>End card</h3>
+            <div class="field"><input id="eTitle" placeholder="Title, e.g. Swara *AI*" /></div>
+            <div class="field"><input id="eSub" placeholder="Subtitle, e.g. Your AI singing coach." /></div>
+            <div class="field"><input id="eCta" placeholder="Call to action, e.g. Be a pilot tester · Link in bio" /></div>
+            <div class="field"><input id="eUrl" placeholder="Small line, e.g. layalabs.in · Building in public" /></div>
+            <h3>Trim</h3>
+            <div class="row"><input type="number" step="0.1" id="sIn" /><button class="btn" data-set2="sIn">Start = playhead</button>
+              <input type="number" step="0.1" id="sOut" /><button class="btn" data-set2="sOut">End = playhead</button></div>
+          </div>
+          <div class="tab hidden" id="tab-look">
+            <div id="looks" class="looks"></div>
+          </div>
+          <div class="tab hidden" id="tab-trim">
+            <div class="field"><label>Start</label>
+              <div class="row"><input type="number" step="0.1" min="0" id="trimIn" /><button class="btn" data-set="trimIn">Set to playhead</button></div></div>
+            <div class="field"><label>End</label>
+              <div class="row"><input type="number" step="0.1" min="0" id="trimOut" /><button class="btn" data-set="trimOut">Set to playhead</button></div>
+              <p class="muted small">Set the end before you reach for the camera. The last seconds fade out.</p></div>
+            <div class="field"><label>Fade-out length (s)</label><input type="number" step="0.1" min="0" max="5" id="fadeOut" /></div>
+            <div class="field cover-only"><label class="check"><input type="checkbox" id="titleCard" /> Show song title at the start</label></div>
+            <div class="field cover-only"><label>Instrument level vs voice: <b id="instVal"></b></label>
+              <input type="range" min="-9" max="3" step="0.5" id="instDb" /></div>
+          </div>
+          <div class="tab hidden" id="tab-export">
+            <div class="exports">
+              <button class="btn primary" data-render="ig">Instagram Reel<small>1080×1920 · AAC 192k</small></button>
+              <button class="btn primary" data-render="yt">YouTube Shorts 4K<small>2160×3840 · AAC 320k · mono-safe</small></button>
+            </div>
+            <div id="renderBox" class="hidden">
+              <div class="bar"><i id="renderBar"></i></div>
+              <span id="renderMsg" class="muted small"></span>
+            </div>
+            <div id="outputs" class="outputs"></div>
+            <h3>Post caption</h3>
+            <div class="row">
+              <select id="capPlatform"><option>Instagram</option><option>YouTube Shorts</option></select>
+              <button class="btn" id="capBtn">Write caption</button>
+              <button class="btn" id="capCopy">Copy</button>
+            </div>
+            <textarea id="capText" rows="12" placeholder="Your caption appears here"></textarea>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- settings -->
+    <section id="view-settings" class="view hidden">
+      <h2>Settings</h2>
+      <div class="card">
+        <h3>AI model (optional)</h3>
+        <p class="muted small">The editing runs on built-in rules. Add your own API key and a model will also fix mis-heard words and write post captions. Better models give better results. Your key stays on this computer.</p>
+        <div class="field"><label>Provider</label>
+          <select id="sProvider">
+            <option value="none">None (rules only)</option>
+            <option value="anthropic">Anthropic Claude</option>
+            <option value="openai">OpenAI-compatible</option>
+          </select></div>
+        <div class="field ai"><label>API key</label><input id="sKey" type="password" autocomplete="off" placeholder="Paste your key" /></div>
+        <div class="field ai"><label>Model</label>
+          <select id="sModelClaude">
+            <option value="claude-opus-5-5">Claude Opus 5.5 (best quality)</option>
+            <option value="claude-sonnet-5-5">Claude Sonnet 5.5 (balanced)</option>
+            <option value="claude-haiku-5-5">Claude Haiku 5.5 (cheapest)</option>
+            <option value="claude-fable-5-1">Claude Fable 5.1 (most capable)</option>
+          </select>
+          <input id="sModelOther" placeholder="Model name, e.g. the one your provider lists" /></div>
+        <div class="field openai-only"><label>Base URL</label><input id="sBase" placeholder="https://api.openai.com/v1" /></div>
+        <div class="row"><button class="btn" id="testAi">Test connection</button><span id="aiResult" class="small"></span></div>
+      </div>
+      <div class="card" id="setupCard">
+        <h3>AI models</h3>
+        <p class="muted small">Speech recognition, voice/instrument separation, the AI voice and the face finder (about 1.2 GB, downloaded once).</p>
+        <div class="row"><button class="btn primary" id="setupBtn">Download models</button><span id="setupMsg" class="small muted"></span></div>
+        <div class="bar"><i id="setupBar"></i></div>
+      </div>
+      <div class="card">
+        <h3>Engine</h3>
+        <div class="field"><label>Python (engine environment)</label><input id="sPython" /></div>
+        <div class="field"><label>Engine script</label><input id="sEngine" /></div>
+        <div class="field"><label>Projects folder</label>
+          <div class="row"><input id="sProjects" /><button class="btn" id="pickProjects">Choose…</button></div></div>
+        <div class="row"><button class="btn" id="checkEngine">Check engine</button><span id="engineResult" class="small"></span></div>
+      </div>
+      <div class="row end"><span id="savedMsg" class="muted small"></span><button class="btn primary" id="saveSettings">Save</button></div>
+    </section>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,18 @@
+# Reel Studio engine (Python 3.12). Same set on macOS (arm64) and Windows (x64).
+anthropic==2.4.0
+audio-separator==0.47.1
+av==19.0.2
+faster-whisper==1.2.1
+imageio-ffmpeg==0.8.0
+kokoro-onnx==0.6.1
+librosa==1.0.0
+mediapipe==1.2.0
+noisereduce==3.0.3
+numpy==2.5.4
+onnxruntime==1.31.0
+opencv-python-headless==5.0.0.93
+pedalboard==0.9.26
+pillow==13.0.0
+pyloudnorm==0.2.0
+soundfile==0.14.0
+torch==2.14.1
