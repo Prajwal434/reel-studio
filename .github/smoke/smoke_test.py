@@ -4,6 +4,8 @@ Usage: <bundled python> smoke_test.py <engine.py> <work dir>"""
 import json, os, subprocess, sys, time
 
 ENGINE, WORK = sys.argv[1], sys.argv[2]
+if os.environ.get("RS_BIN"):  # the bundled ffmpeg, the same way the engine finds it
+    os.environ["PATH"] = os.environ["RS_BIN"] + os.pathsep + os.environ.get("PATH", "")
 sys.path.insert(0, os.path.dirname(ENGINE))
 os.makedirs(WORK, exist_ok=True)
 FF = "ffmpeg"
