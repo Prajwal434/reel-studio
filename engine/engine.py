@@ -396,10 +396,10 @@ def caption(d, platform):
 def check():
     have = {"ffmpeg": bool(shutil.which("ffmpeg"))}
     mods = {}
-    for m in ("faster_whisper", "cv2", "pedalboard", "noisereduce", "pyloudnorm", "librosa", "anthropic", "PIL", "kokoro_onnx", "audio_separator", "mediapipe", "av"):
+    for m in ("faster_whisper", "cv2", "pedalboard", "noisereduce", "pyloudnorm", "librosa", "anthropic", "PIL", "kokoro_onnx", "audio_separator.separator", "mediapipe", "av"):  # the separator module itself, so missing runtime deps show up
         try: __import__(m); mods[m] = True
         except Exception: mods[m] = False
-    sep = mods["audio_separator"]
+    sep = mods["audio_separator.separator"]
     model = os.path.exists(os.path.join(MODELS, SEP_MODEL)) and os.path.exists(os.path.join(MODELS, "kokoro", "kokoro-v1.0.onnx"))
     ok = all(have.values()) and all(mods.values()) and sep and model
     emit("done", ok=ok, tools=have, modules=mods, separator=sep, separator_model=model, python=sys.executable)
