@@ -15,8 +15,6 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 120
     env:
-      RS_MODELS: ${{ runner.temp }}\models
-      RS_WHISPER_DIR: ${{ runner.temp }}\models\whisper
       PYTHONIOENCODING: utf-8
     steps:
       - uses: actions/checkout@v4
@@ -32,6 +30,7 @@ jobs:
         run: |
           $dist = "desktop\src-tauri\engine-dist"
           $env:RS_BIN = (Resolve-Path "$dist\bin").Path
+          $env:RS_MODELS = "$env:RUNNER_TEMP\models"; $env:RS_WHISPER_DIR = "$env:RUNNER_TEMP\models\whisper"
           & "$dist\python\python.exe" .github\smoke\smoke_test.py "$dist\app\engine.py" "$env:RUNNER_TEMP\smoke"
           if ($LASTEXITCODE -ne 0) { exit 1 }
       - name: Build installer
@@ -51,6 +50,7 @@ jobs:
           Write-Host "installed: $($exe.FullName)"
           $eng = Join-Path $exe.DirectoryName "engine"
           if (-not (Test-Path "$eng\app\engine.py")) { Write-Error "bundled engine missing in the install"; exit 1 }
+          $env:RS_MODELS = "$env:RUNNER_TEMP\models"; $env:RS_WHISPER_DIR = "$env:RUNNER_TEMP\models\whisper"; $env:RS_BIN = "$eng\bin"
           & "$eng\python\python.exe" "$eng\app\engine.py" check
           $p = Start-Process $exe.FullName -PassThru
           Start-Sleep -Seconds 30
